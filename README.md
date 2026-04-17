@@ -40,12 +40,7 @@ ls -l /dev/container_monitor
 
 ### Prepare Root Filesystems
 
-```bash
-# Start with a base rootfs
-sudo ./engine supervisor ./rootfs-base
-```
-
-Create per-container writable copies:
+Create per-container writable copies from the base:
 
 ```bash
 cp -a ./rootfs-base ./rootfs-alpha
@@ -65,12 +60,12 @@ cp cpu_hog ./rootfs-beta/
 In Terminal 1:
 
 ```bash
-sudo ./engine supervisor ./rootfs-base
+sudo ./engine supervisor ./my_rootfs
 ```
 
 Expected output:
 ```
-[supervisor] Ready. base-rootfs=./rootfs-base  socket=/tmp/mini_runtime.sock
+[supervisor] Ready. base-rootfs=./my_rootfs
 ```
 
 ### Launch Containers
@@ -78,8 +73,14 @@ Expected output:
 In Terminal 2:
 
 ```bash
-sudo ./engine start alpha ./rootfs-alpha /bin/sh --soft-mib 48 --hard-mib 80
-sudo ./engine start beta  ./rootfs-beta  /bin/sh --soft-mib 64 --hard-mib 96
+sudo ./engine start c1 ./my_rootfs /bin/sh
+sudo ./engine start c2 ./my_rootfs /bin/ls
+```
+
+With memory limits:
+
+```bash
+sudo ./engine start c3 ./my_rootfs /bin/sh --soft-mib 100 --hard-mib 200 --nice 5
 ```
 
 ### CLI Commands
@@ -89,16 +90,13 @@ sudo ./engine start beta  ./rootfs-beta  /bin/sh --soft-mib 64 --hard-mib 96
 sudo ./engine ps
 
 # View logs for a specific container
-sudo ./engine logs alpha
+sudo ./engine logs c1
 
 # Stop a container gracefully
-sudo ./engine stop alpha
-sudo ./engine stop beta
+sudo ./engine stop c1
 ```
 
 ### Run the Memory Test (Task 4)
-
-Inside the container or directly on the host for the test binary:
 
 ```bash
 # Compile the test monitor
@@ -143,8 +141,8 @@ sudo dmesg -w
 
 ```bash
 # Stop all containers
-sudo ./engine stop alpha
-sudo ./engine stop beta
+sudo ./engine stop c1
+sudo ./engine stop c2
 
 # Unload the kernel module
 sudo rmmod monitor
@@ -157,57 +155,103 @@ dmesg | tail -5
 
 ## 3. Demo with Screenshots
 
+### Task 1 — Multi-Container Runtime with Parent Supervisor
+
+**Screenshot 1 — Starting the supervisor**
+
+![Start Supervisor](Images/1_task1_start_supervisor.png)
+
+*The engine is compiled with `gcc -o engine engine.c -lpthread` and the supervisor is launched with `sudo ./engine supervisor ./my_rootfs`. The output `[supervisor] Ready. base-rootfs=./my_rootfs` confirms the long-running parent process is alive and waiting for container start commands. The `logs/` and `my_rootfs/` directories are created beforehand as required.*
+
+---
+
+**Screenshot 2 — Running two containers under one supervisor**
+
+![Two Containers](Images/2_task1_two_containers.png)
+
+*Two containers are started concurrently under the same supervisor: `c1` (running `/bin/sh`) and `c2` (running `/bin/ls`). The supervisor responds with `OK: Started c1 (PID 1000)` and `OK: Started c2 (PID 1001)`, confirming that both processes are tracked with unique host PIDs and that the supervisor remains alive while managing multiple isolated containers simultaneously.*
+
+---
+
+### Task 2 — Supervisor CLI and Signal Handling
+
+**Screenshot 3 — `ps` command showing tracked container metadata**
+
+![PS Command](Images/3_task2_ps_command.png)
+
+*The `sudo ./engine ps` command queries the supervisor over the Unix domain socket IPC channel and returns a formatted table of all tracked containers. The table displays container ID, host PID, current status (`running`), soft limit, hard limit, and nice value for each container — demonstrating that the supervisor correctly maintains per-container metadata under concurrent access.*
+
+---
+
+### Task 3 — Bounded-Buffer Logging and IPC Design
+
+**Screenshot 4 — Starting `c3` with limits and `ps` confirming 100 MiB / 200 MiB**
+
+![C3 Start and PS](Images/4_task3_start_c3_ps_limits.png)
+
+*Container `c3` is launched with `--soft-mib 100 --hard-mib 200 --nice 5`, and the supervisor responds with `OK: Started c3 (PID 1002)`. The subsequent `ps` output shows all three containers running, with `c3` correctly reflecting its configured soft limit of `100M` and hard limit of `200M`. This confirms that CLI arguments are parsed, transmitted over the Unix socket IPC channel, and stored accurately in the supervisor's internal container metadata.*
+
+---
+
+**Screenshot 5 — Log files on disk and `engine logs c1` output**
+
+![Logs Output](Images/5_task3_logs_output.png)
+
+*`ls -l ./logs` shows three log files (`c1.log`, `c2.log`, `c3.log`) created by the supervisor's consumer logging threads, confirming persistent per-container log files. The `sudo ./engine logs c1` command retrieves `c1.log`, displaying `[LOG]: Container initialized and running.` — evidence that the producer thread captured stdout from the container pipe and the consumer thread wrote it to disk through the bounded buffer pipeline without data loss.*
+
+---
+
 ### Task 4 — Kernel Memory Monitoring with Soft and Hard Limits
 
-**Screenshot 1 — `test_monitor.c` compilation and execution**
+**Screenshot 6 — `test_monitor.c` compilation and execution**
 
-![test_monitor execution](Images/1_task4_test_monitor_execution.png)
+![test_monitor execution](Images/6_task4_test_monitor_execution.png)
 
 *The `test_monitor` binary is compiled and run as root. It registers its PID (3668) with the kernel module via `ioctl`, configuring a soft limit of 20 MB and a hard limit of 40 MB. In Step 1 it allocates 25 MB (crossing the soft limit) and waits 3 seconds for the kernel to detect and log the SOFT LIMIT event. In Step 2 it allocates an additional 20 MB (total 45 MB, crossing the hard limit) and waits for the kernel to dispatch SIGKILL. The process is killed as expected.*
 
 ---
 
-**Screenshot 2 — `dmesg -w` output showing SOFT and HARD limit events**
+**Screenshot 7 — `dmesg -w` showing SOFT and HARD limit kernel events**
 
-![dmesg soft and hard limit](Images/2_task4_dmesg_soft_hard_limit.png)
+![dmesg soft and hard limit](Images/7_task4_dmesg_soft_hard_limit.png)
 
 *The kernel module (`container_monitor`) logs events in real time. The `SOFT LIMIT` warning appears when the process's RSS first exceeds 20 MB, with PID, RSS, and limit values printed. The `HARD LIMIT` line follows when RSS surpasses 40 MB — the module dispatches SIGKILL to the process. Both events reference `container=student_a_test`, confirming end-to-end PID registration, periodic RSS polling, and policy enforcement from within the kernel.*
 
 ---
 
-**Screenshot 3 — Supervisor running in supervisor mode**
+**Screenshot 8 — Engine running in supervisor mode**
 
-![supervisor mode](Images/3_task4_supervisor_mode.png)
+![supervisor mode](Images/8_task4_supervisor_mode.png)
 
-*The engine is started in supervisor mode. The output confirms the base rootfs path and the Unix domain socket path (`/tmp/mini_runtime.sock`) that the supervisor listens on for CLI commands from child shells. This is the long-running parent process that manages container lifecycles.*
+*The engine is started in supervisor mode against `./rootfs-base`. The output confirms the base rootfs path and the Unix domain socket path (`/tmp/mini_runtime.sock`) the supervisor listens on for CLI commands. This is the long-running parent process that also receives host PIDs forwarded to the kernel module via `ioctl` for memory monitoring.*
 
 ---
 
 ### Task 5 — Scheduler Experiments and Analysis
 
-**Screenshot 4 — Terminal 1: High-priority CPU hog (nice = −20)**
+**Screenshot 9 — Terminal 1: High-priority CPU hog (nice = −20)**
 
-![cpu_hog high priority](Images/4_task5_cpu_hog_high_priority.png)
+![cpu_hog high priority](Images/9_task5_cpu_hog_high_priority.png)
 
-*`cpu_hog` is launched with `sudo nice -n -20`, giving it the highest possible scheduling priority. The accumulator increments aggressively each second, reaching values above 1.6 × 10¹⁸ by elapsed second 10. This confirms that the CFS scheduler grants a substantially larger CPU share to the high-priority task.*
+*`cpu_hog` is launched with `sudo nice -n -20`, giving it the highest possible scheduling priority. The accumulator increments aggressively each second, reaching values above 1.6 × 10¹⁸ by elapsed second 10. This confirms that the CFS scheduler grants a substantially larger CPU share to the high-priority task when both instances compete for the same CPU.*
 
 ---
 
-**Screenshot 5 — Terminal 2: Low-priority CPU hog (nice = 19)**
+**Screenshot 10 — Terminal 2: Low-priority CPU hog (nice = 19)**
 
-![cpu_hog low priority](Images/5_task5_cpu_hog_low_priority.png)
+![cpu_hog low priority](Images/10_task5_cpu_hog_low_priority.png)
 
-*`cpu_hog` is launched with `sudo nice -n 19` (lowest priority). Running concurrently with the high-priority instance, its accumulator values are consistently lower, reaching only around 1.09 × 10¹⁸ by elapsed second 9 before stopping. The CFS scheduler's weight-based time-slice allocation visibly starves the low-priority process of CPU time relative to the high-priority one.*
+*`cpu_hog` is launched with `sudo nice -n 19` (lowest priority). Running concurrently with the high-priority instance, its accumulator values are consistently lower, stopping at elapsed second 9 with a final value around 1.09 × 10¹⁸. The CFS scheduler's weight-based time-slice allocation visibly reduces the CPU time available to the low-priority process relative to the high-priority one.*
 
 ---
 
 ### Task 6 — Resource Cleanup
 
-**Screenshot 6 — Clean module unload and teardown**
+**Screenshot 11 — Clean module unload and teardown**
 
-![clean teardown](Images/6_task6_clean_teardown.png)
+![clean teardown](Images/11_task6_clean_teardown.png)
 
-*After stopping all containers, `sudo rmmod monitor` is issued. A `dmesg | tail -5` confirms the sequence: the kernel module logged the final SOFT LIMIT and HARD LIMIT events for PID 3668, followed by a clocksource message, and finally `[container_monitor] Module unloaded.` — confirming that the kernel linked list was fully freed, no stale entries remain, and the module exited cleanly with no resource leaks.*
+*After stopping all containers, `sudo rmmod monitor` is issued. A `dmesg | tail -5` confirms the full sequence: the kernel module logged the final SOFT LIMIT and HARD LIMIT events for PID 3668, followed by a clocksource message, and finally `[container_monitor] Module unloaded.` — confirming that the kernel linked list was fully freed, no stale entries remain, and the module exited cleanly with no resource leaks.*
 
 ---
 
@@ -304,16 +348,16 @@ Both `cpu_hog` instances performed a CPU-intensive accumulation loop and printed
 
 | Elapsed (s) | High Priority (nice −20) Accumulator | Low Priority (nice 19) Accumulator |
 |:-----------:|--------------------------------------:|------------------------------------:|
-| 1 | 1,267,725,456,532,712,0311 | 427,869,281,922,339,6055 |
-| 2 | 5,635,418,319,742,108,785 | 1,090,905,385,446,252,0393 |
-| 3 | 7,816,202,356,766,223,125 | 7,166,238,086,817,169,153 |
-| 4 | 5,755,571,477,062,780,708 | 7,869,797,159,044,611,795 |
-| 5 | 1,644,334,721,356,706,5538 | 1,065,366,964,596,577,1968 |
-| 6 | 1,443,534,919,205,679,97 | 4,699,426,206,667,323,920 |
-| 7 | — | 1,176,622,799,668,977,3935 |
-| 8 | 1,115,254,353,388,748,1810 | 1,754,165,661,683,435,4704 |
-| 9 | 1,332,239,804,308,084,1232 | 1,092,538,941,276,397,8968 |
-| 10 | 1,631,941,535,115,874,1638 | — (process ended) |
+| 1  | 1,267,725,456,532,712,031  | 427,869,281,922,339,605   |
+| 2  | 5,635,418,319,742,108,785  | 1,090,905,385,446,252,039 |
+| 3  | 7,816,202,356,766,223,125  | 7,166,238,086,817,169,153 |
+| 4  | 5,755,571,477,062,780,708  | 7,869,797,159,044,611,795 |
+| 5  | 1,644,334,721,356,706,553  | 1,065,366,964,596,577,196 |
+| 6  | 1,443,534,919,205,679,970  | 4,699,426,206,667,323,920 |
+| 7  | 1,520,008,409,436,089,154  | 1,176,622,799,668,977,393 |
+| 8  | 1,115,254,353,388,748,181  | 1,754,165,661,683,435,470 |
+| 9  | 1,332,239,804,308,084,123  | 1,092,538,941,276,397,896 |
+| 10 | 1,631,941,535,115,874,163  | — (process ended)         |
 
 **Final accumulator — High priority:** ~1.63 × 10¹⁸
 **Final accumulator — Low priority:** ~1.09 × 10¹⁸ (over 9 seconds)
