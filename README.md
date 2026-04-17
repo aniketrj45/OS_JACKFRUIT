@@ -205,7 +205,7 @@ dmesg | tail -5
 
 **Screenshot 6 — `test_monitor.c` compilation and execution**
 
-![test_monitor execution](Images/6_task4_test_monitor_execution.png)
+![test_monitor execution](Images/1_task4_test_monitor_execution.png)
 
 *The `test_monitor` binary is compiled and run as root. It registers its PID (3668) with the kernel module via `ioctl`, configuring a soft limit of 20 MB and a hard limit of 40 MB. In Step 1 it allocates 25 MB (crossing the soft limit) and waits 3 seconds for the kernel to detect and log the SOFT LIMIT event. In Step 2 it allocates an additional 20 MB (total 45 MB, crossing the hard limit) and waits for the kernel to dispatch SIGKILL. The process is killed as expected.*
 
@@ -213,7 +213,7 @@ dmesg | tail -5
 
 **Screenshot 7 — `dmesg -w` showing SOFT and HARD limit kernel events**
 
-![dmesg soft and hard limit](Images/7_task4_dmesg_soft_hard_limit.png)
+![dmesg soft and hard limit](Images/2_task4_dmesg_soft_hard_limit.png)
 
 *The kernel module (`container_monitor`) logs events in real time. The `SOFT LIMIT` warning appears when the process's RSS first exceeds 20 MB, with PID, RSS, and limit values printed. The `HARD LIMIT` line follows when RSS surpasses 40 MB — the module dispatches SIGKILL to the process. Both events reference `container=student_a_test`, confirming end-to-end PID registration, periodic RSS polling, and policy enforcement from within the kernel.*
 
@@ -221,7 +221,7 @@ dmesg | tail -5
 
 **Screenshot 8 — Engine running in supervisor mode**
 
-![supervisor mode](Images/8_task4_supervisor_mode.png)
+![supervisor mode](Images/3_task4_supervisor_mode.png)
 
 *The engine is started in supervisor mode against `./rootfs-base`. The output confirms the base rootfs path and the Unix domain socket path (`/tmp/mini_runtime.sock`) the supervisor listens on for CLI commands. This is the long-running parent process that also receives host PIDs forwarded to the kernel module via `ioctl` for memory monitoring.*
 
@@ -231,7 +231,7 @@ dmesg | tail -5
 
 **Screenshot 9 — Terminal 1: High-priority CPU hog (nice = −20)**
 
-![cpu_hog high priority](Images/9_task5_cpu_hog_high_priority.png)
+![cpu_hog high priority](Images/4_task5_cpu_hog_high_priority.png)
 
 *`cpu_hog` is launched with `sudo nice -n -20`, giving it the highest possible scheduling priority. The accumulator increments aggressively each second, reaching values above 1.6 × 10¹⁸ by elapsed second 10. This confirms that the CFS scheduler grants a substantially larger CPU share to the high-priority task when both instances compete for the same CPU.*
 
@@ -239,7 +239,7 @@ dmesg | tail -5
 
 **Screenshot 10 — Terminal 2: Low-priority CPU hog (nice = 19)**
 
-![cpu_hog low priority](Images/10_task5_cpu_hog_low_priority.png)
+![cpu_hog low priority](Images/5_task5_cpu_hog_low_priority.png)
 
 *`cpu_hog` is launched with `sudo nice -n 19` (lowest priority). Running concurrently with the high-priority instance, its accumulator values are consistently lower, stopping at elapsed second 9 with a final value around 1.09 × 10¹⁸. The CFS scheduler's weight-based time-slice allocation visibly reduces the CPU time available to the low-priority process relative to the high-priority one.*
 
@@ -249,7 +249,7 @@ dmesg | tail -5
 
 **Screenshot 11 — Clean module unload and teardown**
 
-![clean teardown](Images/11_task6_clean_teardown.png)
+![clean teardown](Images/6_task6_clean_teardown.png)
 
 *After stopping all containers, `sudo rmmod monitor` is issued. A `dmesg | tail -5` confirms the full sequence: the kernel module logged the final SOFT LIMIT and HARD LIMIT events for PID 3668, followed by a clocksource message, and finally `[container_monitor] Module unloaded.` — confirming that the kernel linked list was fully freed, no stale entries remain, and the module exited cleanly with no resource leaks.*
 
